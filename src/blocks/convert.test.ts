@@ -16,9 +16,10 @@ function toBlocks(states: BlockState[], comments: Map<string, string>): BlockLik
 }
 
 describe('blocks ⇄ source', () => {
-  it.each(EXAMPLES.map(e => [e.id, e] as const))('round-trips the %s example to the same memory image', (_id, ex) => {
-    const original = assemble(ex.src);
-    const { state, comments } = sourceToState(ex.src, original.sym);
+  const versions = EXAMPLES.flatMap(e => (['pt-BR', 'en'] as const).map(lang => [e.id, lang, e.src[lang]] as const));
+  it.each(versions)('round-trips the %s example (%s) to the same memory image', (_id, _lang, src) => {
+    const original = assemble(src);
+    const { state, comments } = sourceToState(src, original.sym);
     const gen = blocksToSource(toBlocks(state.blocks.blocks, comments));
     const again = assemble(gen.text);
     expect(again.errors).toEqual([]);

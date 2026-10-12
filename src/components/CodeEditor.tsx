@@ -2,13 +2,15 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as monaco from 'monaco-editor/editor/editor.api';
 import 'monaco-editor/features/register.all';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
+import { useI18n } from '../i18n/context';
+import { MESSAGES, type Messages } from '../i18n/messages';
 import type { AsmError, Sym } from '../neander/assembler';
-import { DIRECTIVES, OPS, hx, isDirective, isOp, signed } from '../neander/isa';
+import { DIRECTIVES, OPS, hx, isDirective, isOp, signed, type OpInfo, type OpName } from '../neander/isa';
 
 (globalThis as unknown as { MonacoEnvironment: object }).MonacoEnvironment = { getWorker: () => new EditorWorker() };
 
-// Hover and completion read the latest symbols and memory through this shared context.
-const ctx: { sym: Map<string, Sym>; memAt: (a: number) => number } = { sym: new Map(), memAt: () => 0 };
+// Hover and completion read the latest symbols, memory and messages through this shared context.
+const ctx: { sym: Map<string, Sym>; memAt: (a: number) => number; t: Messages } = { sym: new Map(), memAt: () => 0, t: MESSAGES['pt-BR'] };
 
 let languageReady = false;
 function ensureLanguage() {
@@ -18,7 +20,7 @@ function ensureLanguage() {
   monaco.languages.setMonarchTokensProvider('neander', {
     ignoreCase: true,
     mnemonics: Object.keys(OPS),
-    directives: Object.keys(DIRECTIVES),
+    directives: [...DIRECTIVES],
     tokenizer: {
       root: [
         [/;.*$/, 'comment'],
@@ -35,7 +37,7 @@ function ensureLanguage() {
     provideHover(model, pos) {
       const w = model.getWordAtPosition(pos);
       if (!w) return null;
-      const K = w.word.toUpperCase();
+      const K = w.word.toUpperCase(), t = ctx.t;
       const range = new monaco.Range(pos.lineNumber, w.startColumn, pos.lineNumber, w.endColumn);
       if (isOp(K)) {
         const op = OPS[K];
@@ -43,17 +45,17 @@ function ensureLanguage() {
           range,
           contents: [
             { value: `**${K}** · opcode \`${hx(op.code)}\` · ${op.size} byte${op.size > 1 ? 's' : ''}` },
-            { value: `\`${op.effect}\`\n\n${op.desc}` }
+            { value: `\`${t.ops[K].effect}\`\n\n${t.ops[K].desc}` }
           ]
         };
       }
-      if (isDirective(K)) return { range, contents: [{ value: `**${K}** · diretiva` }, { value: DIRECTIVES[K] }] };
+      if (isDirective(K)) return { range, contents: [{ value: `**${K}** · ${t.editor.directive}` }, { value: t.directives[K] }] };
       const s = ctx.sym.get(K);
       if (!s) return null;
-      const lines = [`**${s.name}** = \`${hx(s.value)}\` (${s.value}) · ${s.kind === 'equ' ? 'constante' : 'endereço'}, linha ${s.line}`];
+      const lines = [`**${s.name}** = \`${hx(s.value)}\` (${s.value}) · ${s.kind === 'equ' ? t.editor.constant : t.editor.address}, ${t.editor.line(s.line)}`];
       if (s.kind === 'addr' && s.value < 256) {
         const v = ctx.memAt(s.value);
-        lines.push(`Na memória agora: \`${hx(v)}\` = ${v}${v > 127 ? ` (${signed(v)})` : ''}`);
+        lines.push(`${t.editor.inMemory}: \`${hx(v)}\` = ${v}${v > 127 ? ` (${signed(v)})` : ''}`);
       }
       return { range, contents: lines.map(value => ({ value })) };
     }
@@ -63,15 +65,15 @@ function ensureLanguage() {
     provideCompletionItems(model, pos) {
       const w = model.getWordUntilPosition(pos);
       const range = new monaco.Range(pos.lineNumber, w.startColumn, pos.lineNumber, w.endColumn);
-      const K = monaco.languages.CompletionItemKind;
+      const K = monaco.languages.CompletionItemKind, t = ctx.t;
       const suggestions: monaco.languages.CompletionItem[] = [];
-      for (const [k, v] of Object.entries(OPS))
-        suggestions.push({ label: k, kind: K.Keyword, detail: v.effect, documentation: v.desc, insertText: v.size === 2 ? k + ' ' : k, range, sortText: '1' + k });
-      for (const [k, v] of Object.entries(DIRECTIVES))
-        suggestions.push({ label: k, kind: K.Module, detail: 'diretiva', documentation: { value: v }, insertText: k + ' ', range, sortText: '2' + k });
+      for (const [k, v] of Object.entries(OPS) as [OpName, OpInfo][])
+        suggestions.push({ label: k, kind: K.Keyword, detail: t.ops[k].effect, documentation: t.ops[k].desc, insertText: v.size === 2 ? k + ' ' : k, range, sortText: '1' + k });
+      for (const k of DIRECTIVES)
+        suggestions.push({ label: k, kind: K.Module, detail: t.editor.directive, documentation: { value: t.directives[k] }, insertText: k + ' ', range, sortText: '2' + k });
       for (const s of ctx.sym.values())
         suggestions.push({
-          label: s.name, kind: s.kind === 'equ' ? K.Constant : K.Variable, detail: `${hx(s.value)} · linha ${s.line}`,
+          label: s.name, kind: s.kind === 'equ' ? K.Constant : K.Variable, detail: `${hx(s.value)} · ${t.editor.line(s.line)}`,
           insertText: s.name, range, sortText: '0' + s.name
         });
       return { suggestions };
@@ -139,10 +141,12 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const bpRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
   const pcRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
+  const { t } = useI18n();
   const propsRef = useRef(props);
   propsRef.current = props;
   ctx.sym = props.sym;
   ctx.memAt = props.memAt;
+  ctx.t = t;
 
   const bpLines = () => [...new Set((bpRef.current?.getRanges() ?? []).map(r => r.startLineNumber))].sort((a, b) => a - b);
   const setBreakpoints = (lines: number[]) => {
@@ -152,7 +156,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
         options: {
           isWholeLine: true,
           glyphMarginClassName: 'bp-glyph',
-          glyphMarginHoverMessage: { value: 'Ponto de parada · clique para remover' },
+          glyphMarginHoverMessage: { value: ctx.t.editor.breakpoint },
           stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
         }
       }))
@@ -232,14 +236,14 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
         .filter(e => e.line <= model.getLineCount())
         .map(e => ({
           severity: monaco.MarkerSeverity.Error,
-          message: e.msg,
+          message: e.msg(t),
           startLineNumber: e.line,
           endLineNumber: e.line,
           startColumn: model.getLineFirstNonWhitespaceColumn(e.line) || 1,
           endColumn: model.getLineMaxColumn(e.line)
         }))
     );
-  }, [props.errors]);
+  }, [props.errors, t]);
 
   useEffect(() => {
     const editor = editorRef.current, model = editor?.getModel();
@@ -252,6 +256,11 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
     pcRef.current?.set([{ range: new monaco.Range(line, 1, line, 1), options: { isWholeLine: true, className: 'pc-line', linesDecorationsClassName: 'pc-arrow' } }]);
     if (props.revealPc) editor.revealLineInCenterIfOutsideViewport(line);
   }, [props.pcLine, props.revealPc]);
+
+  // Breakpoint hovers carry text: redraw them in the new language.
+  useEffect(() => {
+    if (editorRef.current) setBreakpoints(bpLines());
+  }, [t]);
 
   useEffect(() => {
     monaco.editor.setTheme(props.dark ? 'neander-dark' : 'neander-light');

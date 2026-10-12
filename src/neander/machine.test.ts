@@ -1,33 +1,33 @@
 import { describe, expect, it } from 'vitest';
+import type { Lang } from '../i18n/messages';
 import { assemble } from './assembler';
 import { EXAMPLES } from './examples';
 import { Machine } from './machine';
 
-const result: Record<string, [label: string, value: number]> = {
-  sum: ['R', 42],
-  mul: ['R', 42],
-  max: ['MAIOR', 42],
-  array: ['SOMA', 42]
+const result: Record<Lang, Record<string, [label: string, value: number]>> = {
+  'pt-BR': { sum: ['R', 42], mul: ['R', 42], max: ['MAIOR', 42], array: ['SOMA', 42] },
+  en: { sum: ['R', 42], mul: ['R', 42], max: ['MAX', 42], array: ['SUM', 42] }
 };
+const versions = EXAMPLES.flatMap(e => (['pt-BR', 'en'] as const).map(lang => [e.id, lang, e.src[lang]] as const));
 
 function runToHalt(m: Machine, limit = 5000) {
   while (!m.halted && m.steps < limit) m.step();
 }
 
 describe('Machine', () => {
-  it.each(EXAMPLES.map(e => [e.id, e] as const))('runs the %s example to the expected result', (id, ex) => {
-    const p = assemble(ex.src);
+  it.each(versions)('runs the %s example (%s) to the expected result', (id, lang, src) => {
+    const p = assemble(src);
     expect(p.errors).toEqual([]);
     const m = new Machine();
     m.reset(p.mem);
     runToHalt(m);
     expect(m.halted).toBe(true);
-    const [label, value] = result[id];
+    const [label, value] = result[lang][id];
     expect(m.mem[p.sym.get(label)!.value]).toBe(value);
   });
 
   it('undoes every step back to the loaded state', () => {
-    const p = assemble(EXAMPLES.find(e => e.id === 'array')!.src);
+    const p = assemble(EXAMPLES.find(e => e.id === 'array')!.src['pt-BR']);
     const m = new Machine();
     m.reset(p.mem);
     runToHalt(m);

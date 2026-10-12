@@ -1,3 +1,4 @@
+import type { Messages } from '../i18n/messages';
 import type { Assembly } from './assembler';
 import { OPS, bin, h2, hx, opOf } from './isa';
 import type { Machine, TraceRec } from './machine';
@@ -40,31 +41,37 @@ export function makeView(fmt: DisplayFormat, program: Assembly): View {
   return { fmtA, fmtV, ref, insText };
 }
 
+/** The instruction a history entry ran, with its operand as a label when possible. */
+export function recIns(r: TraceRec, view: View): string {
+  if (r.kind === 'edit') return `MEM[${view.fmtA(r.at)}]`;
+  return r.name ? (r.addr === null ? r.name : `${r.name} ${view.ref(r.addr)}`) : `?${h2(r.byte)}`;
+}
+
 /** [instruction, effect] for a history entry, in the current display format. */
-export function recText(t: TraceRec, view: View): [string, string] {
-  const { fmtA, fmtV, ref } = view;
-  if (t.kind === 'edit') return [`MEM[${fmtA(t.at)}]`, `alterado à mão: ${fmtV(t.old)} → ${fmtV(t.val)}`];
-  const ins = t.name ? (t.addr === null ? t.name : `${t.name} ${ref(t.addr)}`) : `?${h2(t.byte)}`;
-  switch (t.name) {
-    case 'STA': return [ins, `MEM[${fmtA(t.addr!)}] ← ${fmtV(t.ac1)}`];
+export function recText(r: TraceRec, view: View, t: Messages): [string, string] {
+  const { fmtA, fmtV } = view;
+  const ins = recIns(r, view);
+  if (r.kind === 'edit') return [ins, t.trace.edited(fmtV(r.old), fmtV(r.val))];
+  switch (r.name) {
+    case 'STA': return [ins, `MEM[${fmtA(r.addr!)}] ← ${fmtV(r.ac1)}`];
     case 'LDA':
     case 'ADD':
     case 'OR':
     case 'AND':
-    case 'NOT': return [ins, `AC ${fmtV(t.ac0)} → ${fmtV(t.ac1)}  N=${t.fn} Z=${t.fz}`];
-    case 'JMP': return [ins, `PC ← ${fmtA(t.addr!)}`];
-    case 'JN': return [ins, t.jumped ? `N=1, desviou para ${fmtA(t.addr!)}` : 'N=0, sem desvio'];
-    case 'JZ': return [ins, t.jumped ? `Z=1, desviou para ${fmtA(t.addr!)}` : 'Z=0, sem desvio'];
-    case 'HLT': return [ins, 'Máquina parada'];
-    case 'NOP': return [ins, 'Nada'];
-    default: return [ins, `${hx(t.byte)} não é um opcode do Neander; executado como NOP`];
+    case 'NOT': return [ins, `AC ${fmtV(r.ac0)} → ${fmtV(r.ac1)}  N=${r.fn} Z=${r.fz}`];
+    case 'JMP': return [ins, `PC ← ${fmtA(r.addr!)}`];
+    case 'JN': return [ins, r.jumped ? t.trace.jumped('N', fmtA(r.addr!)) : t.trace.noJump('N')];
+    case 'JZ': return [ins, r.jumped ? t.trace.jumped('Z', fmtA(r.addr!)) : t.trace.noJump('Z')];
+    case 'HLT': return [ins, t.trace.halted];
+    case 'NOP': return [ins, t.trace.nothing];
+    default: return [ins, t.trace.notOpcode(hx(r.byte))];
   }
 }
 
 /** [instruction, what it will do] for the instruction at PC. */
-export function describeNext(m: Machine, view: View): [string, string] {
+export function describeNext(m: Machine, view: View, t: Messages): [string, string] {
   const { fmtA, fmtV, ref, insText } = view;
-  if (m.halted) return ['Parado', 'O HLT foi executado. Clique em Reiniciar para recomeçar ou em Voltar para desfazer.'];
+  if (m.halted) return [t.next.halted, t.next.haltedWhat];
   const b = m.mem[m.pc], name = opOf(b), a = m.mem[(m.pc + 1) & 255], v = m.mem[a], ac = m.ac;
   const r = ref(a), loc = r === fmtA(a) ? r : `${r} (${fmtA(a)})`;
   switch (name) {
@@ -75,24 +82,24 @@ export function describeNext(m: Machine, view: View): [string, string] {
     case 'AND': return [insText(b, a), `AC ← ${fmtV(ac)} AND ${fmtV(v)} = ${fmtV(ac & v)}`];
     case 'NOT': return ['NOT', `AC ← NOT ${fmtV(ac)} = ${fmtV(~ac)}`];
     case 'JMP': return [insText(b, a), `PC ← ${loc}`];
-    case 'JN': return [insText(b, a), m.n ? `N = 1, então desvia para ${loc}` : `N = 0, então continua em ${fmtA(m.pc + 2)}`];
-    case 'JZ': return [insText(b, a), m.z ? `Z = 1, então desvia para ${loc}` : `Z = 0, então continua em ${fmtA(m.pc + 2)}`];
-    case 'HLT': return ['HLT', 'Para a máquina'];
-    case 'NOP': return ['NOP', 'Não faz nada e segue em frente'];
-    default: return [`?${h2(b)}`, `${fmtV(b)} não é opcode; é executado como NOP`];
+    case 'JN': return [insText(b, a), m.n ? t.next.jumps('N', loc) : t.next.continues('N', fmtA(m.pc + 2))];
+    case 'JZ': return [insText(b, a), m.z ? t.next.jumps('Z', loc) : t.next.continues('Z', fmtA(m.pc + 2))];
+    case 'HLT': return ['HLT', t.next.hlt];
+    case 'NOP': return ['NOP', t.next.nop];
+    default: return [`?${h2(b)}`, t.next.notOpcode(fmtV(b))];
   }
 }
 
 /** What a memory byte is, for the memory table's last column. */
-export function meaning(a: number, m: Machine, program: Assembly, view: View): { text: string; soft: boolean } {
+export function meaning(a: number, m: Machine, program: Assembly, view: View, t: Messages): { text: string; soft: boolean } {
   const r = program.role[a], v = m.mem[a];
   if (r === 'op') {
-    if (!opOf(v)) return { text: `${view.fmtV(v)}: não é opcode`, soft: true };
+    if (!opOf(v)) return { text: t.meaning.notOpcode(view.fmtV(v)), soft: true };
     return { text: view.insText(v, m.mem[(a + 1) & 255]), soft: false };
   }
-  if (r === 'arg') return { text: '↳ operando', soft: true };
-  if (r === 'data') return { text: m.writes[a] ? 'dado · alterado' : 'dado', soft: true };
-  if (r === 'res') return { text: 'reservado', soft: true };
-  if (m.writes[a]) return { text: 'gravado durante a execução', soft: true };
+  if (r === 'arg') return { text: t.meaning.operand, soft: true };
+  if (r === 'data') return { text: m.writes[a] ? t.meaning.dataChanged : t.meaning.data, soft: true };
+  if (r === 'res') return { text: t.meaning.reserved, soft: true };
+  if (m.writes[a]) return { text: t.meaning.written, soft: true };
   return { text: '', soft: true };
 }

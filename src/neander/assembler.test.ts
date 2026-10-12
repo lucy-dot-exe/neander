@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { MESSAGES } from '../i18n/messages';
 import { assemble, evalExpr, parseNum } from './assembler';
+
+const pt = MESSAGES['pt-BR'], en = MESSAGES.en;
 
 describe('parseNum', () => {
   it.each([
@@ -21,8 +24,9 @@ describe('evalExpr', () => {
     expect(evalExpr('-1', sym)).toEqual({ v: -1 });
   });
   it('reports unknown labels and dangling operators', () => {
-    expect(evalExpr('Q', sym).err).toBe('Rótulo "Q" não definido');
-    expect(evalExpr('1+', sym).err).toBe('O valor termina com um operador');
+    expect(evalExpr('Q', sym).err?.(pt)).toBe('Rótulo "Q" não definido');
+    expect(evalExpr('1+', sym).err?.(pt)).toBe('O valor termina com um operador');
+    expect(evalExpr('Q', sym).err?.(en)).toBe('Label "Q" is not defined');
   });
 });
 
@@ -71,7 +75,7 @@ DB 999
 X: NOT 4
  ORG 255
 LDA 1`);
-    expect(p.errors.map(e => [e.line, e.msg])).toEqual([
+    expect(p.errors.map(e => [e.line, e.msg(pt)])).toEqual([
       [1, 'LDA precisa de um endereço, como em LDA X'],
       [2, 'Instrução "FOO" desconhecida'],
       [3, 'Rótulo "Q" não definido'],
@@ -81,11 +85,12 @@ LDA 1`);
       [6, 'NOT não recebe operando'],
       [8, 'O programa passa do último endereço, FFh (255)']
     ]);
+    expect(p.errors.map(e => e.msg(en))).toContain('Label "X" was already defined on line 1');
   });
 
   it('rejects overlapping bytes and instruction names used as labels', () => {
-    expect(assemble('ORG 0\nDB 1\nORG 0\nDB 2').errors[0].msg).toBe('O endereço 00h já é usado pela linha 2');
-    expect(assemble('ADD: HLT').errors[0].msg).toBe('"ADD" é nome de instrução e não pode ser usado como rótulo');
+    expect(assemble('ORG 0\nDB 1\nORG 0\nDB 2').errors[0].msg(pt)).toBe('O endereço 00h já é usado pela linha 2');
+    expect(assemble('ADD: HLT').errors[0].msg(pt)).toBe('"ADD" é nome de instrução e não pode ser usado como rótulo');
     expect(assemble('constructor: HLT').errors).toEqual([]);
   });
 });

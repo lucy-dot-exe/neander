@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef } from 'react';
+import { useI18n } from '../i18n/context';
 import type { Assembly } from '../neander/assembler';
 import { meaning, type View } from '../neander/format';
 import type { Machine } from '../neander/machine';
@@ -42,6 +43,7 @@ interface Props {
 const ADDRS = Array.from({ length: 256 }, (_, a) => a);
 
 export function MemoryTable({ machine: m, program, view, selected, breakpoints, hideUnused, followPc, onSelect }: Props) {
+  const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
   const target = m.nextDataTarget();
 
@@ -75,7 +77,7 @@ export function MemoryTable({ machine: m, program, view, selected, breakpoints, 
       className="mem-scroll"
       ref={scrollRef}
       tabIndex={0}
-      aria-label="Conteúdo da memória. Use as setas para mudar de endereço."
+      aria-label={t.memory.label}
       onKeyDown={e => {
         const d = ({ ArrowDown: 1, ArrowUp: -1, PageDown: 16, PageUp: -16 } as Record<string, number>)[e.key];
         if (!d) return;
@@ -86,11 +88,11 @@ export function MemoryTable({ machine: m, program, view, selected, breakpoints, 
       <table className="mem">
         <thead>
           <tr>
-            <th aria-label="Marcador" />
-            <th>Endereço</th>
-            <th>Valor</th>
-            <th>Rótulo</th>
-            <th>Significado</th>
+            <th aria-label={t.memory.marker} />
+            <th>{t.memory.address}</th>
+            <th>{t.memory.value}</th>
+            <th>{t.memory.label_}</th>
+            <th>{t.memory.meaning}</th>
           </tr>
         </thead>
         <tbody>
@@ -98,7 +100,7 @@ export function MemoryTable({ machine: m, program, view, selected, breakpoints, 
             const v = m.mem[a];
             const used = !!(program.role[a] || v || m.fetches[a] || m.reads[a] || m.writes[a] || a === m.pc);
             const bp = breakpoints.has(a);
-            const mean = meaning(a, m, program, view);
+            const mean = meaning(a, m, program, view, t);
             const cls = [
               used ? '' : 'unused',
               a === m.pc ? 'pc' : '',

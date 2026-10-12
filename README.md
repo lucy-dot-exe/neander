@@ -2,7 +2,8 @@
 
 A web workbench for **Neander**, the 8-bit teaching computer designed by Raul Weber and used in the
 computer architecture courses at UFRGS. Write a program, assemble it, run it one instruction at a time
-and watch every register, flag and memory address change. The interface is in Brazilian Portuguese.
+and watch every register, flag and memory address change. The interface is in Brazilian Portuguese or English,
+switchable from the top bar (it starts in the browser's language).
 
 ## Features
 
@@ -18,10 +19,10 @@ and watch every register, flag and memory address change. The interface is in Br
   data access and the bytes just read or written. Click an address for its value in every base, how
   often it was fetched/read/written, the source line that produced it, and a box to change it.
 - **Display formats:** addresses and values in hex, decimal or binary, chosen separately.
-- **Examples:** addition, multiplication by repeated addition, the larger of two numbers, and an array
+- **Examples** (in both languages): addition, multiplication by repeated addition, the larger of two numbers, and an array
   sum that rewrites its own code (Neander has no index register).
 
-Your program, editor mode and display choices are saved in the browser.
+Your program, language, editor mode and display choices are saved in the browser.
 
 ## Development
 
@@ -40,6 +41,7 @@ npm run preview    # serve the built site
 | Path | What it holds |
 |---|---|
 | `src/neander/` | The instruction set, assembler, machine (with undo) and display formatting. No UI code. |
+| `src/i18n/` | Every piece of interface text, in Portuguese and English, and the React context that selects one. |
 | `src/blocks/` | Block definitions for Blockly and the conversion between blocks and assembly text. |
 | `src/hooks/useSimulator.ts` | Loaded program, machine state, status messages and the run loop. |
 | `src/components/` | The editors and the machine panels. |

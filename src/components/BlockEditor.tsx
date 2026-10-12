@@ -1,7 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import * as Blockly from 'blockly/core';
-import { TOOLBOX, blockTheme, defineBlocks } from '../blocks/definitions';
+import { blockTheme, setBlockLanguage, toolbox } from '../blocks/definitions';
 import { blocksToSource, sourceToState, type BlockLike, type Generated } from '../blocks/convert';
+import { useI18n } from '../i18n/context';
 import { assemble, type AsmError } from '../neander/assembler';
 
 export interface BlockEditorHandle {
@@ -28,7 +29,9 @@ interface Props {
 const EMPTY: Generated = { text: '', lineBlock: [], loose: 0 };
 const generate = (ws: Blockly.WorkspaceSvg) => blocksToSource(ws.getTopBlocks(true) as unknown as BlockLike[]);
 
+/** Built in one language; give it a `key` per language so a change rebuilds it. */
 export const BlockEditor = forwardRef<BlockEditorHandle, Props>(function BlockEditor(props, ref) {
+  const { lang, t } = useI18n();
   const hostRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<Blockly.WorkspaceSvg | null>(null);
   const genRef = useRef<Generated>(EMPTY);
@@ -40,10 +43,10 @@ export const BlockEditor = forwardRef<BlockEditorHandle, Props>(function BlockEd
   const [generation, setGeneration] = useState(0);
 
   useEffect(() => {
-    defineBlocks();
+    setBlockLanguage(lang, t);
     const host = hostRef.current!;
     const ws = Blockly.inject(host, {
-      toolbox: TOOLBOX,
+      toolbox: toolbox(t),
       renderer: 'zelos',
       theme: blockTheme(propsRef.current.dark),
       trashcan: false,
@@ -113,11 +116,11 @@ export const BlockEditor = forwardRef<BlockEditorHandle, Props>(function BlockEd
       const id = genRef.current.lineBlock[e.line - 1];
       const b = id ? ws.getBlockById(id) : null;
       if (b) {
-        b.setWarningText(e.msg);
+        b.setWarningText(e.msg(t));
         warned.current.push(b.id);
       }
     }
-  }, [props.errors, props.errorsSource, generation]);
+  }, [props.errors, props.errorsSource, generation, t]);
 
   useEffect(() => {
     const ws = wsRef.current;

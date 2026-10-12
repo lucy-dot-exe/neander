@@ -1,3 +1,4 @@
+import type { Text } from '../i18n/messages';
 import { OPS, hx, isDirective, isOp } from './isa';
 
 export type Role = 'op' | 'arg' | 'data' | 'res' | null;
@@ -11,7 +12,7 @@ export interface Sym {
 
 export interface AsmError {
   line: number;
-  msg: string;
+  msg: Text;
 }
 
 export interface Assembly {
@@ -39,12 +40,12 @@ export function parseNum(t: string): number | null {
   return null;
 }
 
-export type EvalResult = { v: number; err?: undefined } | { v?: undefined; err: string };
+export type EvalResult = { v: number; err?: undefined } | { v?: undefined; err: Text };
 
 /** Evaluates `term (+|- term)*`, where a term is a number or a label. */
 export function evalExpr(s: string, sym: Map<string, Sym>): EvalResult {
   const src = (s || '').replace(/\s+/g, '');
-  if (!src) return { err: 'Falta um valor' };
+  if (!src) return { err: t => t.asm.missingValue };
   const toks = src.match(/[+-]|[^+-]+/g) ?? [];
   let total = 0, sign = 1, want = true;
   for (const t of toks) {
@@ -53,19 +54,19 @@ export function evalExpr(s: string, sym: Map<string, Sym>): EvalResult {
       want = true;
       continue;
     }
-    if (!want) return { err: `"${t}" inesperado` };
+    if (!want) return { err: m => m.asm.unexpected(t) };
     let v = parseNum(t);
     if (v === null) {
-      if (!/^[A-Za-z_]\w*$/.test(t)) return { err: `"${t}" não é um número nem um rótulo` };
+      if (!/^[A-Za-z_]\w*$/.test(t)) return { err: m => m.asm.notNumber(t) };
       const e = sym.get(t.toUpperCase());
-      if (!e) return { err: `Rótulo "${t}" não definido` };
+      if (!e) return { err: m => m.asm.undefinedLabel(t) };
       v = e.value;
     }
     total += sign * v;
     sign = 1;
     want = false;
   }
-  if (want) return { err: 'O valor termina com um operador' };
+  if (want) return { err: t => t.asm.trailingOperator };
   return { v: total };
 }
 
@@ -80,7 +81,7 @@ export function assemble(source: string): Assembly {
   const errors: AsmError[] = [];
   const sym = new Map<string, Sym>();
   const items: Item[] = [];
-  const err = (line: number, msg: string) => errors.push({ line, msg });
+  const err = (line: number, msg: Text) => errors.push({ line, msg });
   let lc = 0;
 
   for (let i = 0; i < lines.length; i++) {
@@ -106,7 +107,7 @@ export function assemble(source: string): Assembly {
       } else {
         const om = text.match(/^([A-Za-z_]\w*)\b\s*(.*)$/);
         if (!om) {
-          err(ln, `Era esperada uma instrução, mas foi encontrado "${text}"`);
+          err(ln, t => t.asm.expectedInstruction(text));
           continue;
         }
         mnem = om[1].toUpperCase();
@@ -116,16 +117,18 @@ export function assemble(source: string): Assembly {
     if (label) {
       const K = label.toUpperCase();
       if (isOp(K) || isDirective(K)) {
-        err(ln, `"${label}" é nome de instrução e não pode ser usado como rótulo`);
+        const name = label;
+        err(ln, t => t.asm.reservedLabel(name));
         label = null;
       } else if (sym.has(K)) {
-        err(ln, `O rótulo "${label}" já foi definido na linha ${sym.get(K)!.line}`);
+        const name = label, first = sym.get(K)!.line;
+        err(ln, t => t.asm.duplicateLabel(name, first));
         label = null;
       }
     }
     if (mnem === 'EQU') {
       if (!label) {
-        if (!errors.some(e => e.line === ln)) err(ln, 'EQU precisa de um nome, como em DEZ EQU 10');
+        if (!errors.some(e => e.line === ln)) err(ln, t => t.asm.equNeedsName);
         continue;
       }
       const r = evalExpr(args, sym);
@@ -142,11 +145,13 @@ export function assemble(source: string): Assembly {
     if (mnem === 'ORG') {
       const r = evalExpr(args, sym);
       if (r.err !== undefined) {
-        err(ln, 'ORG: ' + r.err);
+        const e = r.err;
+        err(ln, t => 'ORG: ' + e(t));
         continue;
       }
       if (r.v < 0 || r.v > 255) {
-        err(ln, `ORG ${r.v} está fora da memória (0 a 255)`);
+        const v = r.v;
+        err(ln, t => t.asm.orgOutside(v));
         continue;
       }
       lc = r.v;
@@ -155,7 +160,7 @@ export function assemble(source: string): Assembly {
     }
     if (mnem === 'DB') {
       if (!args) {
-        err(ln, 'DB precisa de pelo menos um valor, como em DB 5');
+        err(ln, t => t.asm.dbEmpty);
         continue;
       }
       const parts = args.split(',');
@@ -166,11 +171,12 @@ export function assemble(source: string): Assembly {
     if (mnem === 'DS') {
       const r = evalExpr(args, sym);
       if (r.err !== undefined) {
-        err(ln, 'DS: ' + r.err);
+        const e = r.err;
+        err(ln, t => 'DS: ' + e(t));
         continue;
       }
       if (r.v < 1 || r.v > 256) {
-        err(ln, 'DS precisa de um tamanho entre 1 e 256');
+        err(ln, t => t.asm.dsSize);
         continue;
       }
       items.push({ kind: 'ds', ln, addr: lc, size: r.v });
@@ -178,16 +184,17 @@ export function assemble(source: string): Assembly {
       continue;
     }
     if (!isOp(mnem)) {
-      err(ln, `Instrução "${mnem}" desconhecida`);
+      const name = mnem;
+      err(ln, t => t.asm.unknownInstruction(name));
       continue;
     }
     const op = OPS[mnem];
     if (op.size === 1 && args) {
-      err(ln, `${mnem} não recebe operando`);
+      err(ln, t => t.asm.noOperand(mnem));
       continue;
     }
     if (op.size === 2 && !args) {
-      err(ln, `${mnem} precisa de um endereço, como em ${mnem} X`);
+      err(ln, t => t.asm.needsAddress(mnem));
       continue;
     }
     items.push({ kind: 'ins', ln, addr: lc, op: mnem, args });
@@ -200,11 +207,12 @@ export function assemble(source: string): Assembly {
   const lineAddr = new Map<number, number>();
   const put = (a: number, v: number, r: Role, ln: number) => {
     if (a > 255) {
-      err(ln, 'O programa passa do último endereço, FFh (255)');
+      err(ln, t => t.asm.pastEnd);
       return false;
     }
     if (role[a]) {
-      err(ln, `O endereço ${hx(a)} já é usado pela linha ${lineOf[a]}`);
+      const other = lineOf[a];
+      err(ln, t => t.asm.addressUsed(hx(a), other));
       return false;
     }
     mem[a] = v & 255;
@@ -224,7 +232,8 @@ export function assemble(source: string): Assembly {
         continue;
       }
       if (r.v < 0 || r.v > 255) {
-        err(it.ln, `O endereço ${r.v} está fora da memória (0 a 255)`);
+        const v = r.v;
+        err(it.ln, t => t.asm.addressOutside(v));
         continue;
       }
       put(it.addr + 1, r.v, 'arg', it.ln);
@@ -236,7 +245,8 @@ export function assemble(source: string): Assembly {
           break;
         }
         if (r.v < -128 || r.v > 255) {
-          err(it.ln, `${r.v} não cabe em um byte (-128 a 255)`);
+          const v = r.v;
+          err(it.ln, t => t.asm.byteRange(v));
           break;
         }
         if (!put(it.addr + k, r.v, 'data', it.ln)) break;

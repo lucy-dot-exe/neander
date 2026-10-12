@@ -1,73 +1,88 @@
 import * as Blockly from 'blockly/core';
+import * as En from 'blockly/msg/en';
 import * as PtBr from 'blockly/msg/pt-br';
-import { OPS, type OpName } from '../neander/isa';
+import type { Lang, Messages } from '../i18n/messages';
+import type { OpName } from '../neander/isa';
 
-Blockly.setLocale(PtBr as unknown as Record<string, string>);
-
-const OP_BLOCKS: [OpName, string, string, string?][] = [
-  ['LDA', 'carregar AC com %2', 'memory', 'X'],
-  ['STA', 'guardar AC em %2', 'memory', 'R'],
-  ['ADD', 'somar %2 ao AC', 'math', 'Y'],
-  ['NOT', 'inverter todos os bits do AC', 'math'],
-  ['AND', 'E lógico do AC com %2', 'math', 'MASCARA'],
-  ['OR', 'OU lógico do AC com %2', 'math', 'MASCARA'],
-  ['JMP', 'desviar para %2', 'control', 'LACO'],
-  ['JZ', 'se zero, desviar para %2', 'control', 'FIM'],
-  ['JN', 'se negativo, desviar para %2', 'control', 'LACO'],
-  ['NOP', 'não fazer nada', 'control'],
-  ['HLT', 'parar a máquina', 'control']
+const OP_STYLES: [OpName, string][] = [
+  ['LDA', 'memory'],
+  ['STA', 'memory'],
+  ['ADD', 'math'],
+  ['NOT', 'math'],
+  ['AND', 'math'],
+  ['OR', 'math'],
+  ['JMP', 'control'],
+  ['JZ', 'control'],
+  ['JN', 'control'],
+  ['NOP', 'control'],
+  ['HLT', 'control']
 ];
 
-let defined = false;
+const mn = (t: string) => ({ type: 'field_label', text: t, class: 'blk-mn' });
+const stmt = { previousStatement: null, nextStatement: null };
 
-/** Registers the Neander block types once. Each block maps to one line of assembly. */
-export function defineBlocks() {
-  if (defined) return;
-  defined = true;
-  const mn = (t: string) => ({ type: 'field_label', text: t, class: 'blk-mn' });
-  const stmt = { previousStatement: null, nextStatement: null };
-  const defs: object[] = [
-    {
-      type: 'n_start', message0: 'no endereço %1',
+/** Block JSON in the given language, keyed by block type. Each block maps to one line of assembly. */
+function blockDefs(t: Messages): Record<string, object> {
+  const b = t.blocks;
+  const defs: Record<string, object> = {
+    n_start: {
+      message0: b.start,
       args0: [{ type: 'field_number', name: 'ADDR', value: 0, min: 0, max: 255, precision: 1 }],
-      nextStatement: null, style: 'start_blocks',
-      tooltip: 'Tudo o que for encaixado embaixo vai para a memória a partir deste endereço (ORG).'
+      nextStatement: null, style: 'start_blocks', tooltip: b.startTip
     },
-    {
-      type: 'n_label', message0: 'rótulo %1', args0: [{ type: 'field_input', name: 'NAME', text: 'LACO' }],
-      ...stmt, style: 'label_blocks', tooltip: 'Dá nome ao endereço do próximo bloco, para ser usado em desvios e cargas.'
+    n_label: {
+      message0: b.label, args0: [{ type: 'field_input', name: 'NAME', text: b.labelDefault }],
+      ...stmt, style: 'label_blocks', tooltip: b.labelTip
     },
-    {
-      type: 'n_db', message0: '%1 byte %2 = %3',
+    n_db: {
+      message0: b.db,
       args0: [mn('DB'), { type: 'field_input', name: 'NAME', text: 'X' }, { type: 'field_input', name: 'VALUE', text: '0' }],
-      ...stmt, style: 'data_blocks', tooltip: 'Grava bytes na memória (DB). Separe vários valores com vírgulas. O nome é opcional.'
+      ...stmt, style: 'data_blocks', tooltip: b.dbTip
     },
-    {
-      type: 'n_ds', message0: '%1 reservar %2 bytes com o nome %3',
+    n_ds: {
+      message0: b.ds,
       args0: [mn('DS'), { type: 'field_input', name: 'SIZE', text: '1' }, { type: 'field_input', name: 'NAME', text: 'BUF' }],
-      ...stmt, style: 'data_blocks', tooltip: 'Reserva bytes zerados (DS).'
+      ...stmt, style: 'data_blocks', tooltip: b.dsTip
     },
-    {
-      type: 'n_equ', message0: '%1 constante %2 = %3',
-      args0: [mn('EQU'), { type: 'field_input', name: 'NAME', text: 'DEZ' }, { type: 'field_input', name: 'VALUE', text: '10' }],
-      ...stmt, style: 'data_blocks', tooltip: 'Dá nome a um número sem usar memória (EQU).'
+    n_equ: {
+      message0: b.equ,
+      args0: [mn('EQU'), { type: 'field_input', name: 'NAME', text: b.equDefault }, { type: 'field_input', name: 'VALUE', text: '10' }],
+      ...stmt, style: 'data_blocks', tooltip: b.equTip
     },
-    {
-      type: 'n_note', message0: 'nota %1', args0: [{ type: 'field_input', name: 'TEXT', text: 'o que esta parte faz' }],
-      ...stmt, style: 'note_blocks', tooltip: 'Um comentário. Não vai para a memória.'
+    n_note: {
+      message0: b.note, args0: [{ type: 'field_input', name: 'TEXT', text: b.noteDefault }],
+      ...stmt, style: 'note_blocks', tooltip: b.noteTip
     }
-  ];
-  for (const [op, text, style, def] of OP_BLOCKS) {
-    defs.push({
-      type: 'n_' + op.toLowerCase(),
+  };
+  for (const [op, style] of OP_STYLES) {
+    const [text, def] = b.ops[op];
+    defs['n_' + op.toLowerCase()] = {
       message0: '%1 ' + (def ? text : text.replace('%2', '')),
       args0: def ? [mn(op), { type: 'field_input', name: 'ADDR', text: def }] : [mn(op)],
       ...stmt,
       style: style + '_blocks',
-      tooltip: `${op}: ${OPS[op].effect}. ${OPS[op].desc}`
-    });
+      tooltip: `${op}: ${t.ops[op].effect}. ${t.ops[op].desc}`
+    };
   }
-  Blockly.defineBlocksWithJsonArray(defs);
+  return defs;
+}
+
+let current: Record<string, object> = {};
+
+/**
+ * Puts Blockly and the Neander blocks in the given language. Blocks read their text when they
+ * are created, so only blocks made after this call change; the editor is rebuilt to apply it.
+ */
+export function setBlockLanguage(lang: Lang, t: Messages) {
+  Blockly.setLocale((lang === 'en' ? En : PtBr) as unknown as Record<string, string>);
+  current = blockDefs(t);
+  for (const type of Object.keys(current)) {
+    Blockly.Blocks[type] ??= {
+      init(this: Blockly.Block) {
+        this.jsonInit(current[type]);
+      }
+    };
+  }
 }
 
 const makeTheme = (dark: boolean) =>
@@ -116,17 +131,20 @@ export function blockTheme(dark: boolean) {
 
 const block = (type: string, fields?: Record<string, number>) => ({ kind: 'block', type, ...(fields ? { fields } : {}) });
 
-export const TOOLBOX = {
-  kind: 'categoryToolbox',
-  contents: [
-    { kind: 'category', name: 'Início', categorystyle: 'start_category', contents: [block('n_start', { ADDR: 0 }), block('n_start', { ADDR: 128 })] },
-    { kind: 'category', name: 'Memória', categorystyle: 'memory_category', contents: [block('n_lda'), block('n_sta')] },
-    { kind: 'category', name: 'Aritmética e lógica', categorystyle: 'math_category', contents: [block('n_add'), block('n_not'), block('n_and'), block('n_or')] },
-    {
-      kind: 'category', name: 'Desvios', categorystyle: 'jump_category',
-      contents: [block('n_label'), block('n_jmp'), block('n_jz'), block('n_jn'), block('n_nop'), block('n_hlt')]
-    },
-    { kind: 'category', name: 'Dados', categorystyle: 'data_category', contents: [block('n_db'), block('n_ds'), block('n_equ')] },
-    { kind: 'category', name: 'Notas', categorystyle: 'note_category', contents: [block('n_note')] }
-  ]
+export const toolbox = (t: Messages) => {
+  const c = t.blocks.categories;
+  return {
+    kind: 'categoryToolbox',
+    contents: [
+      { kind: 'category', name: c.start, categorystyle: 'start_category', contents: [block('n_start', { ADDR: 0 }), block('n_start', { ADDR: 128 })] },
+      { kind: 'category', name: c.memory, categorystyle: 'memory_category', contents: [block('n_lda'), block('n_sta')] },
+      { kind: 'category', name: c.math, categorystyle: 'math_category', contents: [block('n_add'), block('n_not'), block('n_and'), block('n_or')] },
+      {
+        kind: 'category', name: c.jumps, categorystyle: 'jump_category',
+        contents: [block('n_label'), block('n_jmp'), block('n_jz'), block('n_jn'), block('n_nop'), block('n_hlt')]
+      },
+      { kind: 'category', name: c.data, categorystyle: 'data_category', contents: [block('n_db'), block('n_ds'), block('n_equ')] },
+      { kind: 'category', name: c.notes, categorystyle: 'note_category', contents: [block('n_note')] }
+    ]
+  };
 };

@@ -12,6 +12,8 @@ import { ViewMenu } from './components/ViewMenu';
 import { useDarkMode } from './hooks/useDarkMode';
 import { useSimulator, type Speed } from './hooks/useSimulator';
 import { isBoolean, isString, oneOf, useStoredState } from './hooks/useStoredState';
+import { I18nContext } from './i18n/context';
+import { MESSAGES, detectLang, type Lang } from './i18n/messages';
 import { assemble } from './neander/assembler';
 import { EXAMPLES } from './neander/examples';
 import { describeNext, makeView, type DisplayFormat } from './neander/format';
@@ -23,15 +25,13 @@ const isBase = oneOf('hex', 'dec', 'bin');
 const isFormat = (v: unknown): v is DisplayFormat =>
   typeof v === 'object' && v !== null && isBase((v as DisplayFormat).addr) && isBase((v as DisplayFormat).val);
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'mem', label: 'Memória' },
-  { id: 'hist', label: 'Histórico' },
-  { id: 'isa', label: 'Instruções' }
-];
+const TABS: Tab[] = ['mem', 'hist', 'isa'];
 
 export default function App() {
   const dark = useDarkMode();
-  const [source, setSource] = useStoredState('neander-source', EXAMPLES[0].src, isString);
+  const [lang, setLang] = useStoredState<Lang>('neander-lang', detectLang, oneOf('pt-BR', 'en'));
+  const t = MESSAGES[lang];
+  const [source, setSource] = useStoredState('neander-source', () => EXAMPLES[0].src[lang], isString);
   const [mode, setMode] = useStoredState<Mode>('neander-mode', 'code', oneOf('code', 'blocks'));
   const [fmt, setFmt] = useStoredState<DisplayFormat>('neander-format', { addr: 'hex', val: 'hex' }, isFormat);
   const [tab, setTab] = useStoredState<Tab>('neander-tab', 'mem', oneOf('mem', 'hist', 'isa'));
@@ -52,6 +52,11 @@ export default function App() {
 
   const latest = useRef({ source, program });
   latest.current = { source, program };
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    document.title = t.title;
+  }, [lang, t]);
 
   const { setSpeed: applySpeed, setBreakpoints, adopt } = sim;
   useEffect(() => applySpeed(speed), [applySpeed, speed]);
@@ -86,16 +91,16 @@ export default function App() {
   const loadExample = (id: string) => {
     const ex = EXAMPLES.find(e => e.id === id);
     if (!ex) return;
-    setSource(ex.src);
-    sim.load(ex.src);
+    setSource(ex.src[lang]);
+    sim.load(ex.src[lang]);
     setSelected(null);
-    sim.setStatus({ kind: '', text: `Exemplo carregado: ${ex.name}` });
+    sim.setStatus({ kind: '', text: t => t.status.exampleLoaded(t.examples[ex.id]) });
   };
 
   const switchMode = (m: Mode) => {
     if (m === mode) return;
     if (m === 'blocks' && live.errors.length) {
-      sim.setStatus({ kind: 'error', text: 'Corrija os problemas no código antes de mudar para blocos' });
+      sim.setStatus({ kind: 'error', text: t => t.status.fixBeforeBlocks });
       return;
     }
     setLoose(0);
@@ -136,17 +141,18 @@ export default function App() {
   }, []);
 
   const pcLine = machine.halted && machine.trace.length ? 0 : program.role[machine.pc] ? program.lineOf[machine.pc] : 0;
-  const [nextIns, nextWhat] = describeNext(machine, view);
+  const [nextIns, nextWhat] = describeNext(machine, view, t);
   const showProblems = live.errors.length > 0 || (mode === 'blocks' && loose > 0);
 
   return (
-    <>
+    <I18nContext.Provider value={{ lang, t }}>
       <TopBar
         status={sim.status}
         running={sim.running}
         canBack={machine.canUndo}
         speed={speed}
         onSpeed={setSpeed}
+        onLang={setLang}
         onAssemble={assembleAndLoad}
         onBack={sim.back}
         onStep={sim.step}
@@ -154,24 +160,24 @@ export default function App() {
         onReset={sim.reset}
       />
       <main className="app">
-        <section className="card program" aria-label="Programa">
+        <section className="card program" aria-label={t.program.section}>
           <div className="card-head">
             <div className="head-left">
               <Segmented
-                label="Editor"
+                label={t.program.editor}
                 value={mode}
                 onChange={switchMode}
                 options={[
-                  { value: 'code', label: 'Código' },
-                  { value: 'blocks', label: 'Blocos' }
+                  { value: 'code', label: t.program.code },
+                  { value: 'blocks', label: t.program.blocks }
                 ]}
               />
-              {dirty && <span className="chip paused">Não montado</span>}
-              {!live.errors.length && <span className="asm-info">{live.bytes} bytes · {live.sym.size} rótulos</span>}
+              {dirty && <span className="chip paused">{t.program.notAssembled}</span>}
+              {!live.errors.length && <span className="asm-info">{t.program.info(live.bytes, live.sym.size)}</span>}
             </div>
-            <select className="select" aria-label="Carregar um programa de exemplo" value="" onChange={e => loadExample(e.target.value)}>
-              <option value="">Exemplos</option>
-              {EXAMPLES.map(ex => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
+            <select className="select" aria-label={t.program.examplesLabel} value="" onChange={e => loadExample(e.target.value)}>
+              <option value="">{t.program.examples}</option>
+              {EXAMPLES.map(ex => <option key={ex.id} value={ex.id}>{t.examples[ex.id]}</option>)}
             </select>
           </div>
 
@@ -192,6 +198,7 @@ export default function App() {
           {mode === 'blocks' && (
             <div className="editor-slot">
               <BlockEditor
+                key={lang}
                 ref={blocksRef}
                 source={source}
                 onSourceChange={setSource}
@@ -210,49 +217,47 @@ export default function App() {
             <div className="problems" aria-live="polite">
               {live.errors.length > 0 && (
                 <>
-                  <span className="err">{live.errors.length} problema{live.errors.length > 1 ? 's' : ''}</span>
+                  <span className="err">{t.program.problems(live.errors.length)}</span>
                   {live.errors.slice(0, 3).map((e, i) => (
                     <button key={i} type="button" onClick={() => goto(e.line)}>
-                      <b>Linha {e.line}</b>
-                      {e.msg}
+                      <b>{t.program.line(e.line)}</b>
+                      {e.msg(t)}
                     </button>
                   ))}
-                  {live.errors.length > 3 && <span className="muted">e mais {live.errors.length - 3}</span>}
+                  {live.errors.length > 3 && <span className="muted">{t.program.andMore(live.errors.length - 3)}</span>}
                 </>
               )}
               {mode === 'blocks' && loose > 0 && (
-                <span className="muted">
-                  {loose} bloco{loose > 1 ? 's' : ''} solto{loose > 1 ? 's' : ''} ignorado{loose > 1 ? 's' : ''} · encaixe embaixo de um bloco "no endereço"
-                </span>
+                <span className="muted">{t.program.loose(loose)}</span>
               )}
             </div>
           )}
         </section>
 
-        <section className="machine" aria-label="Máquina">
+        <section className="machine" aria-label={t.machine.section}>
           <Registers machine={machine} view={view} />
           <NextInstruction machine={machine} ins={nextIns} what={nextWhat} view={view} />
 
           <div className="card tabs">
-            <div className="tablist" role="tablist" aria-label="Painéis">
-              {TABS.map((t, i) => (
+            <div className="tablist" role="tablist" aria-label={t.machine.panels}>
+              {TABS.map((id, i) => (
                 <button
-                  key={t.id}
+                  key={id}
                   role="tab"
-                  id={`tab-${t.id}`}
-                  aria-controls={`panel-${t.id}`}
-                  aria-selected={tab === t.id}
-                  tabIndex={tab === t.id ? 0 : -1}
-                  onClick={() => setTab(t.id)}
+                  id={`tab-${id}`}
+                  aria-controls={`panel-${id}`}
+                  aria-selected={tab === id}
+                  tabIndex={tab === id ? 0 : -1}
+                  onClick={() => setTab(id)}
                   onKeyDown={e => {
                     const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
                     if (!d) return;
                     const next = TABS[(i + d + TABS.length) % TABS.length];
-                    setTab(next.id);
-                    document.getElementById(`tab-${next.id}`)?.focus();
+                    setTab(next);
+                    document.getElementById(`tab-${next}`)?.focus();
                   }}
                 >
-                  {t.label}
+                  {t.machine.tabs[id]}
                 </button>
               ))}
               {tab === 'mem' && (
@@ -300,6 +305,6 @@ export default function App() {
           )}
         </section>
       </main>
-    </>
+    </I18nContext.Provider>
   );
 }

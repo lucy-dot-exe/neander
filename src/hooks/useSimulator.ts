@@ -1,21 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { assemble, sameImage, type Assembly } from '../neander/assembler';
-import { makeView, recText } from '../neander/format';
+import type { Text } from '../i18n/messages';
+import { makeView, recIns } from '../neander/format';
 import { Machine } from '../neander/machine';
 
 export type StatusKind = '' | 'running' | 'paused' | 'halted' | 'error';
 export interface Status {
   kind: StatusKind;
-  text: string;
+  text: Text;
 }
 export type Speed = '2' | '8' | '30' | '200' | 'max';
 
-const HALTED_AGAIN: Status = { kind: 'halted', text: 'Parado · clique em Reiniciar para rodar de novo' };
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-const instructions = (n: number) => `${n} ${n === 1 ? 'instrução' : 'instruções'}`;
+const HALTED_AGAIN: Status = { kind: 'halted', text: t => t.status.haltedAgain };
 const insName = (m: Machine, program: Assembly) => {
   const rec = m.trace.at(-1);
-  return rec ? recText(rec, makeView({ addr: 'hex', val: 'hex' }, program))[0] : '';
+  return rec ? recIns(rec, makeView({ addr: 'hex', val: 'hex' }, program)) : '';
 };
 
 /**
@@ -35,8 +34,8 @@ export function useSimulator(initialSource: string) {
   });
   const [status, setStatus] = useState<Status>(() =>
     program.source === initialSource
-      ? { kind: '', text: `${program.bytes} bytes carregados · aperte F10 para dar um passo` }
-      : { kind: 'error', text: 'Seu rascunho salvo tem problemas · corrija e clique em Montar' }
+      ? { kind: '', text: t => t.status.ready(program.bytes) }
+      : { kind: 'error', text: t => t.status.badDraft }
   );
   const [running, setRunning] = useState(false);
   const [version, setVersion] = useState(0);
@@ -51,13 +50,13 @@ export function useSimulator(initialSource: string) {
     (source: string) => {
       const r = assemble(source);
       if (r.errors.length) {
-        setStatus({ kind: 'error', text: `${plural(r.errors.length, 'problema')} · não carregado` });
+        setStatus({ kind: 'error', text: t => t.status.notLoaded(r.errors.length) });
         return r;
       }
       setRunning(false);
       machine.reset(r.mem);
       setProgram(r);
-      setStatus({ kind: '', text: `${r.bytes} bytes carregados` });
+      setStatus({ kind: '', text: t => t.status.loaded(r.bytes) });
       bump();
       return r;
     },
@@ -76,10 +75,11 @@ export function useSimulator(initialSource: string) {
       setStatus(HALTED_AGAIN);
     } else {
       machine.step();
+      const steps = machine.steps, name = insName(machine, programRef.current);
       setStatus(
         machine.halted
-          ? { kind: 'halted', text: `Parou após ${instructions(machine.steps)}` }
-          : { kind: 'paused', text: `Passo · ${insName(machine, programRef.current)}` }
+          ? { kind: 'halted', text: t => t.status.haltedAfter(steps) }
+          : { kind: 'paused', text: t => t.status.stepped(name) }
       );
     }
     bump();
@@ -89,28 +89,28 @@ export function useSimulator(initialSource: string) {
     setRunning(false);
     const name = insName(machine, programRef.current);
     const rec = machine.back();
-    setStatus(rec ? { kind: 'paused', text: `Desfeito: ${name}` } : { kind: '', text: 'Nada para desfazer' });
+    setStatus(rec ? { kind: 'paused', text: t => t.status.undone(name) } : { kind: '', text: t => t.status.nothingToUndo });
     bump();
   }, [machine, bump]);
 
   const reset = useCallback(() => {
     setRunning(false);
     machine.reset(programRef.current.mem);
-    setStatus({ kind: '', text: 'Reiniciado · memória restaurada' });
+    setStatus({ kind: '', text: t => t.status.reset });
     bump();
   }, [machine, bump]);
 
   const toggleRun = useCallback(() => {
     if (running) {
       setRunning(false);
-      setStatus({ kind: 'paused', text: 'Pausado' });
+      setStatus({ kind: 'paused', text: t => t.status.paused });
       return;
     }
     if (machine.halted) {
       setStatus(HALTED_AGAIN);
       return;
     }
-    setStatus({ kind: 'running', text: 'Executando' });
+    setStatus({ kind: 'running', text: t => t.status.running });
     setRunning(true);
   }, [running, machine]);
 
@@ -147,7 +147,8 @@ export function useSimulator(initialSource: string) {
         // the instruction we start from runs even if it has a breakpoint
         if (!first && breakpointsRef.current.has(machine.pc)) {
           setRunning(false);
-          setStatus({ kind: 'paused', text: `Ponto de parada · linha ${programRef.current.lineOf[machine.pc]}` });
+          const line = programRef.current.lineOf[machine.pc];
+          setStatus({ kind: 'paused', text: t => t.status.breakpoint(line) });
           bump();
           return;
         }
@@ -156,7 +157,8 @@ export function useSimulator(initialSource: string) {
       }
       if (machine.halted) {
         setRunning(false);
-        setStatus({ kind: 'halted', text: `Parou após ${instructions(machine.steps)}` });
+        const steps = machine.steps;
+        setStatus({ kind: 'halted', text: t => t.status.haltedAfter(steps) });
         bump();
         return;
       }
