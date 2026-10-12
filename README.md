@@ -5,6 +5,8 @@ computer architecture courses at UFRGS. Write a program, assemble it, run it one
 and watch every register, flag and memory address change. The interface is in Brazilian Portuguese or English,
 switchable from the top bar (it starts in the browser's language).
 
+**Try it: <https://lucy-dot-exe.github.io/neander/>**
+
 ## Features
 
 - **Two ways to write programs:** a code editor (Monaco, the editor from VS Code) with syntax
