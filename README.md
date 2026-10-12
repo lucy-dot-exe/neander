@@ -36,6 +36,13 @@ npm run build      # type-check and build to dist/
 npm run preview    # serve the built site
 ```
 
+## Deployment
+
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs the tests and the build on every pull request
+and every push to `main`. Pushes to `main` are then published to GitHub Pages at <https://lucy-dot-exe.github.io/neander/>.
+The site lives under `/neander/`, so the workflow builds with `--base=/neander/`; to try that build locally, run
+`npm run build -- --base=/neander/` and `npm run preview -- --base=/neander/`.
+
 ## Layout
 
 | Path | What it holds |
